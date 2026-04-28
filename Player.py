@@ -1,47 +1,122 @@
-import pygame 
+"""
+player.py
+Defines the Player class, which handles movement, gravity, jumping,
+collision detection with floor rects, and drawing.
+"""
+
+import pygame
+from LevelManager import LevelManager
+from Trampoline import Trampoline
+
+GRAVITY = 0.8
+JUMP_VELOCITY = -12
+MOVE_SPEED = 5
+
 
 class Player:
-    def __init__(self, screen):
+    """
+    Represents the player character.
+
+    Attributes:
+        rect      -- pygame.Rect for position and collision
+        vel_y     -- current vertical velocity (positive = falling)
+        on_ground -- True when standing on a platform
+        coins     -- number of coins collected (tracked for HUD/save)
+    """
+
+    def __init__(self, screen: pygame.Surface, floor: list):
         self.screen = screen
-        self.player = pygame.image.load("Files/Player.png")
-        self.x = 100
-        self.y = self.screen.get_height() - self.player.get_height() - 28
-        self.speed = 5
-        self.velocity = 0
-        self.gravity = 0.8
+        self.width = 20
+        self.height = 35
+        # Spawn just above the first floor tile
+        spawn_y = screen.get_height() - 64 - self.height
+        self.rect = pygame.Rect(60, spawn_y, self.width, self.height)
+        self.vel_y = 0.0
+        self.on_ground = False
+        self.coins = 0
+
+    def reset(self, floor: list):
+        """Reset player to spawn position for a new level."""
+        spawn_y = self.screen.get_height() - 64 - self.height
+        self.rect.x = 60
+        self.rect.y = spawn_y
+        self.vel_y = 0.0
         self.on_ground = False
 
-    def handle_input(self):
-        keys = pygame.key.get_pressed()
+    # ------------------------------------------------------------------
+    # Update
+    # ------------------------------------------------------------------
 
+    def update(self, keys: pygame.key.ScancodeWrapper, floor: list, trampoline: list):
+        """
+        Apply input, gravity, movement, and resolve collisions.
+        Called once per frame from the main loop.
+        """
+        self._handle_input(keys)
+        self._apply_gravity()
+        self._move_and_collide(floor)
+        self._on_trampoline(trampoline)  # Check for trampoline collisions after moving
+
+    def _handle_input(self, keys):
+        """Read keyboard state and move horizontally / initiate jump."""
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.x -= self.speed
+            self.rect.x -= MOVE_SPEED
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.x += self.speed
-
+            self.rect.x += MOVE_SPEED
         if (keys[pygame.K_SPACE] or keys[pygame.K_UP] or keys[pygame.K_w]) and self.on_ground:
-            self.velocity = -12        # negative = upward
+            self.vel_y = JUMP_VELOCITY
             self.on_ground = False
 
-    def apply_gravity(self):
-        self.velocity += self.gravity  # pull down every frame
-        self.y += self.velocity
+    def _apply_gravity(self):
+        """Add gravity to vertical velocity each frame."""
+        self.vel_y += GRAVITY
+        self.rect.y += int(self.vel_y)
 
-    def check_collision(self, platforms):
+    def _move_and_collide(self, floor: list):
+        """
+        Resolve vertical collisions against every rect in floor.
+        Uses a dictionary keyed by collision side for clarity.
+        """
         self.on_ground = False
-
-        for platform in platforms:
-            if self.get_rect().colliderect(platform):
+        for platform in floor:
+            if self.rect.colliderect(platform):
                 # Falling down — land on top
-                if self.velocity > 0:
-                    self.y = platform.top - self.player.get_height()
-                    self.velocity = 0
+                if self.vel_y > 0 and self.rect.bottom > platform.top and self.rect.top < platform.top:
+                    self.rect.bottom = platform.top
+                    self.vel_y = 0
                     self.on_ground = True
-                # Moving up — hit ceiling
-                
-
-    def get_rect(self):
-        return pygame.Rect(self.x, self.y, self.player.get_width(), self.player.get_height())
+                # Moving up — hit underside
+                elif self.vel_y < 0 and self.rect.top < platform.bottom and self.rect.bottom > platform.bottom:
+                    self.rect.top = platform.bottom
+                    self.vel_y = 0
     
+    def _on_trampoline(self, trampolines):
+        for trampoline in trampolines:
+            trampoline.update()
+            if (
+                self.vel_y > 0
+                and self.rect.colliderect(trampoline.rect)
+                and self.rect.bottom <= trampoline.rect.bottom + 10
+            ):
+                trampoline.apply_bounce(self)
+
+
+    # ------------------------------------------------------------------
+    # Queries
+    # ------------------------------------------------------------------
+
+    def check_on_map(self, width: int, height: int, level_index: int = 0) -> bool:
+        if self.rect.y > height:
+            return False
+        if self.rect.x < -self.width and level_index == 0:
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Draw
+    # ------------------------------------------------------------------
+
     def draw(self):
-        self.screen.blit(self.player, (self.x, self.y))
+        """Draw the player as a coloured rectangle (replace with sprite if desired)."""
+        player_image = pygame.image.load("Files/Player.png").convert_alpha()
+        self.screen.blit(player_image, (self.rect.x, self.rect.y))
