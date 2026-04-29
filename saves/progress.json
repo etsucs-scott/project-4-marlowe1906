@@ -1,12 +1,12 @@
 {
   "level": 4,
-  "coins": 34,
+  "coins": 38,
   "collected_coins": {
     "0": [
       "coin_0",
       "coin_1",
+      "coin_2",
       "coin_3",
-      "coin_4",
       "coin_5",
       "coin_6",
       "coin_7"
@@ -17,15 +17,18 @@
       "coin_2",
       "coin_3",
       "coin_4",
-      "coin_5"
+      "coin_5",
+      "coin_6",
+      "coin_7"
     ],
     "2": [
       "coin_0",
       "coin_1",
       "coin_2",
       "coin_3",
-      "coin_8",
-      "coin_9"
+      "coin_4",
+      "coin_5",
+      "coin_6"
     ],
     "3": [
       "coin_0",
@@ -34,6 +37,7 @@
       "coin_3",
       "coin_4",
       "coin_5",
+      "coin_6",
       "coin_8",
       "coin_9"
     ],
