@@ -63,7 +63,9 @@ class SaveManager:
             if not isinstance(data, dict):
                 raise ValueError("Save data is not a JSON object.")
             self._validate(data)
-            return data
+            normalized = self._default()
+            normalized.update(data)
+            return normalized
         except FileNotFoundError:
             # First run — no save file yet
             return self._default()
@@ -105,8 +107,18 @@ class SaveManager:
                 raise KeyError(f"Missing required key: '{key}'")
         if not isinstance(data["level"], int) or data["level"] < 0:
             raise ValueError(f"Invalid level value: {data['level']}")
+        if "coins" in data and (not isinstance(data["coins"], int) or data["coins"] < 0):
+            raise ValueError(f"Invalid coin value: {data['coins']}")
+        if "collected_coins" in data:
+            collected = data["collected_coins"]
+            if not isinstance(collected, dict):
+                raise ValueError("Collected coin data must be a dictionary.")
+            for level_key, coin_ids in collected.items():
+                int(level_key)
+                if not isinstance(coin_ids, list) or not all(isinstance(coin_id, str) for coin_id in coin_ids):
+                    raise ValueError("Collected coin ids must be stored as string lists.")
 
     @staticmethod
     def _default() -> dict[str, Any]:
         """Return a fresh default save state."""
-        return {"level": 0, "coins": 0}
+        return {"level": 0, "coins": 0, "collected_coins": {}}

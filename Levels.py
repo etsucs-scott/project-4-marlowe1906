@@ -1,34 +1,34 @@
 """
-levels.py
-Defines the abstract Level base class and all concrete level classes.
-Each level owns its floor rects and knows how to draw itself.
+Levels.py
+Defines the abstract Level base class and all concrete level layouts.
 
-Data structure highlight: platforms are stored in a list of pygame.Rect,
-but the level registry in LevelManager uses an OrderedDict so level order
-is both preserved and keyed by index for O(1) lookup.
+Each level is built from a list of pygame.Rect platforms plus a list of
+Trampoline objects. The routes are designed around the current player
+physics so normal climbs stay within a one-tile rise unless a trampoline
+is intentionally used to launch the player higher.
 """
 
-import pygame
 from abc import ABC, abstractmethod
+
+import pygame
+
+from Coin import Coin
 from Trampoline import Trampoline
 
 
 class Level(ABC):
-    """
-    Abstract base class for all levels.
-    Subclasses must implement build_floor() and optionally override draw().
-    """
+    """Abstract base class for all levels."""
 
     def __init__(self, screen: pygame.Surface):
         self.screen = screen
         self.floor: list[pygame.Rect] = []
-        self.trampolines: list[pygame.Rect] = []
+        self.coins: list[Coin] = []
+        self.trampolines: list[Trampoline] = []
+        self._coin_counter = 0
 
-        # Load shared tile image — catch errors gracefully
         try:
             self.ground = pygame.image.load("Files/GrassTile.png").convert_alpha()
         except (pygame.error, FileNotFoundError):
-            # Fallback: a green surface so the game still runs without assets
             self.ground = pygame.Surface((64, 64))
             self.ground.fill((80, 160, 60))
 
@@ -40,54 +40,68 @@ class Level(ABC):
 
     @abstractmethod
     def build_floor(self):
-        """Populate self.floor with pygame.Rect objects for this level."""
+        """Populate self.floor and self.trampolines."""
 
     def draw(self):
-        """
-        Draw every platform by tiling the ground image across the rect width.
-        Subclasses can call super().draw() and then add extra decorations.
-        """
-        T = self.TILE
+        """Draw ground tiles and trampoline props for the active level."""
+        tile = self.TILE
         for rect in self.floor:
-            for x in range(rect.x, rect.x + rect.width, T):
+            for x in range(rect.x, rect.x + rect.width, tile):
                 self.screen.blit(self.ground, (x, rect.y))
 
-        for t in self.trampolines:
-            t.draw(self.screen)
+        for coin in self.coins:
+            coin.draw(self.screen)
+
+        for trampoline in self.trampolines:
+            trampoline.draw(self.screen)
 
     def get_floor(self) -> list:
-        """Return the list of platform rects for collision detection."""
         return self.floor
-    
+
+    def get_coins(self) -> list:
+        return self.coins
+
     def get_trampolines(self) -> list:
         return self.trampolines
 
-    # ------------------------------------------------------------------
-    # Helpers shared by subclasses
-    # ------------------------------------------------------------------
+    def apply_collected_coin_ids(self, collected_ids: set[str]):
+        """Hide any coins that were already collected in this level."""
+        for coin in self.coins:
+            coin.collected = coin.coin_id in collected_ids
+
+    def collect_coins(self, player_rect: pygame.Rect) -> list[str]:
+        """Collect overlapping coins and return their ids."""
+        collected_ids: list[str] = []
+        for coin in self.coins:
+            if coin.try_collect(player_rect):
+                collected_ids.append(coin.coin_id)
+        return collected_ids
 
     def _add_ground_run(self, start_x: int, end_x: int):
-        """Add a horizontal run of floor tiles from start_x to end_x."""
-        T = self.TILE
-        H = self.H
-        for x in range(start_x, end_x, T):
-            self.floor.append(pygame.Rect(x, H - T, T, T))
+        """Add a horizontal run of full-height ground tiles."""
+        tile = self.TILE
+        y = self.H - tile
+        for x in range(start_x, end_x, tile):
+            self.floor.append(pygame.Rect(x, y, tile, tile))
 
     def _add_platform(self, x: int, y: int, tiles_wide: int):
-        """Add a single elevated platform."""
-        T = self.TILE
-        self.floor.append(pygame.Rect(x, y, T * tiles_wide, 28))
+        """Add an elevated platform using the shared tile width."""
+        self.floor.append(pygame.Rect(x, y, self.TILE * tiles_wide, 28))
 
+    def _add_trampoline(self, x: int, y: int, width: int | None = None):
+        """Add a trampoline that sits over a gap or void."""
+        self.trampolines.append(Trampoline(x=x, y=y, width=width or self.TILE))
 
-# ======================================================================
-# Level 1 — Medium staircase with gaps
-# ======================================================================
+    def _add_coin(self, x: int, y: int, coin_id: str | None = None):
+        """Add a collectible coin to the level."""
+        if coin_id is None:
+            coin_id = f"coin_{self._coin_counter}"
+        self._coin_counter += 1
+        self.coins.append(Coin(x=x, y=y, coin_id=coin_id))
+
 
 class FirstLevel(Level):
-    """
-    Level 1: Introduces gaps and a rising staircase.
-    Teaches the player the jump arc before harder platforming.
-    """
+    """Level 1: A friendly hillside route that teaches the first bounce."""
 
     def __init__(self, screen: pygame.Surface):
         try:
@@ -97,43 +111,38 @@ class FirstLevel(Level):
 
         super().__init__(screen)
 
-        T = self.TILE
-        H = self.H
+        tile = self.TILE
         self.sign_rect = pygame.Rect(
             50,
-            H - T - (self.sign.get_height() if self.sign else T),
-            self.sign.get_width() if self.sign else T,
-            self.sign.get_height() if self.sign else T,
+            self.H - tile - (self.sign.get_height() if self.sign else tile),
+            self.sign.get_width() if self.sign else tile,
+            self.sign.get_height() if self.sign else tile,
         )
 
     def build_floor(self):
-        T = self.TILE
-        H = self.H
-        W = self.W
+        tile = self.TILE
+        h = self.H
 
-        # Ground chunks (gaps force short hops)
-        self._add_ground_run(0,             T * 3)
-        self._add_ground_run(T * 3 + 30,    T * 5 + 30)
+        # Warm-up staircase.
+        self._add_ground_run(0, tile * 3)
+        self._add_platform(230, h - tile * 2, 2)
+        self._add_platform(390, h - tile * 3, 2)
+        self._add_coin(120, h - tile - 36)
+        self._add_coin(255, h - tile * 2 - 28)
+        self._add_coin(332, h - tile * 2 - 52)
+        self._add_coin(415, h - tile * 3 - 28)
 
-        # Section 1 — rising staircase (~60 px steps, within 90 px max jump)
-        self._add_platform(T * 5 + 60,  H - T * 2 + 10, 2)
-        self._add_platform(T * 7 + 80,  H - T * 3 + 10, 2)
-        self._add_platform(T * 9 + 110, H - T * 4 + 10, 2)
+        # Dip down before the first spring jump.
+        self._add_platform(550, h - tile * 2, 1)
+        self._add_trampoline(690, 590)
+        self._add_coin(575, h - tile * 2 - 28)
+        self._add_coin(708, 540)
+        self._add_coin(730, 470)
 
-        # Section 2 — peak then drop
-        self._add_platform(T * 11 + 150, H - T * 5 + 10, 1)   # peak
-        self._add_platform(T * 12 + 200, H - T * 3,      3)   # wide landing
-
-        # Section 3 — gap jumps
-        self._add_platform(T * 15 + 240, H - T * 4, 1)
-        self._add_platform(T * 16 + 270, H - T * 6, 2)        # high point
-        self._add_platform(T * 18 + 300, H - T * 4, 2)        # descend
-
-        # Section 4 — final climb
-        self._add_platform(T * 21 + 330, H - T * 5, 1)
-        self._add_platform(T * 22 + 360, H - T * 7, 2)        # highest
-        self._add_platform(T * 24 + 390, H - T * 5, 1)
-        self._add_platform(T * 25 + 420, H - T * 3, 2)        # end platform
+        # Long finish bridge so the player can carry speed into the exit.
+        self._add_platform(693, h - tile * 4, 3)
+        self._add_coin(770, h - tile * 4 - 36)
+        self._add_coin(850, h - tile * 4 - 20)
 
     def draw(self):
         super().draw()
@@ -141,168 +150,132 @@ class FirstLevel(Level):
             self.screen.blit(self.sign, self.sign_rect)
 
 
-# ======================================================================
-# Level 2 — Longer gaps, no staircase safety net
-# ======================================================================
-
 class SecondLevel(Level):
-    """
-    Level 2: Four acts — ascent, controlled drop, gap gauntlet, high-ceiling finale.
-    All platforms are within physics reach; gaps increase in difficulty toward the end.
-    Uses only integer tile coordinates (no float multipliers).
-    """
+    """Level 2: Broken terraces that end in a rooftop trampoline launch."""
 
     def build_floor(self):
-        T = self.TILE   # 64
-        H = self.H      # 690
-        W = self.W      # 924
+        tile = self.TILE
+        h = self.H
 
-        # ── Ground chunks ──────────────────────────────────────────────────
-        # Start pad — enough room to get moving
-        self._add_ground_run(0, T * 2)                 # 0–128
+        # A staggered climb with one bigger transfer into the spring lane.
+        self._add_ground_run(0, tile * 2)
+        self._add_platform(190, h - tile * 2, 1)
+        self._add_platform(310, h - tile * 3, 2)
+        self._add_platform(500, h - tile * 4, 1)
+        self._add_platform(620, h - tile * 3, 1)
+        self._add_coin(90, h - tile - 40)
+        self._add_coin(215, h - tile * 2 - 28)
+        self._add_coin(365, h - tile * 3 - 36)
+        self._add_coin(525, h - tile * 4 - 30)
+        self._add_coin(645, h - tile * 3 - 28)
 
-        # Mid recovery ground — wide enough to catch a bad landing
-        self._add_ground_run(T * 4, T * 7)             # 256–448
+        # Bounce out of a pit and onto the high finish route.
+        self._add_trampoline(730, 580)
+        self._add_platform(693, h - tile * 5, 3)
+        self._add_coin(748, 530)
+        self._add_coin(760, h - tile * 5 - 50)
+        self._add_coin(845, h - tile * 5 - 24)
 
-        # End ground — goal zone
-        self._add_ground_run(T * 12, W)                # 768–924
-
-        # ── Section 1: Gentle ascent (teaches the jump arc) ───────────────
-        # Each step: ~64 px horizontal gap, ~64 px height gain — safe and readable
-        self._add_platform(T * 2 + 20,  H - T * 2,      1)   # 148, y=562  step 1
-        self._add_platform(T * 3 + 30,  H - T * 3,      1)   # 222, y=498  step 2
-        self._add_platform(T * 5 + 10,  H - T * 4,      2)   # 330, y=434  landing (wide)
-
-        # ── Section 2: Deliberate drop + gap challenge ─────────────────────
-        # Player drops from the wide landing, must then navigate rightward gaps
-        # Horizontal gaps ~110px — within reach but demanding
-        self._add_platform(T * 7 + 20,  H - T * 2 + 10,  1)  # 468, y=572  low step
-        self._add_platform(T * 9,       H - T * 3,        2)  # 576, y=498  recovery (wide)
-
-# ======================================================================
-# Level 3 — The Gauntlet: tight gaps, no safety ground, punishing rhythm
-# ======================================================================
 
 class ThirdLevel(Level):
-    """
-    Level 3: Strips away ground safety nets almost entirely.
-    Forces the player to chain precise jumps in a strict rhythm.
-    A small start pad and a small end pad — nothing in between.
-    """
+    """Level 3: A rhythm course with two spring wells and narrow landings."""
 
     def __init__(self, screen: pygame.Surface):
         try:
             self.bg_tint = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-            self.bg_tint.fill((180, 100, 20, 30))   # warm amber tint
+            self.bg_tint.fill((180, 100, 20, 30))
         except Exception:
             self.bg_tint = None
         super().__init__(screen)
 
     def build_floor(self):
-        T = self.TILE   # 64
-        H = self.H      # 690
-        W = self.W      # 924
+        tile = self.TILE
+        h = self.H
 
-        # Tiny start pad — just enough to land on
-        self._add_ground_run(0, T * 2)                          # 0–128
+        # Tight staircase to establish the tempo.
+        self._add_ground_run(0, tile * 2)
+        self._add_platform(180, h - tile * 2, 1)
+        self._add_platform(290, h - tile * 3, 1)
+        self._add_platform(400, h - tile * 4, 1)
+        self._add_coin(96, h - tile - 42)
+        self._add_coin(205, h - tile * 2 - 28)
+        self._add_coin(315, h - tile * 3 - 28)
+        self._add_coin(425, h - tile * 4 - 28)
 
-        # ── Act 1: Rapid low staircase (px gaps ~80, height ~64) ──────────
-        self._add_platform(T * 2 + 50,  H - T * 2,       1)    # 178,  y=562
-        self._add_platform(T * 3 + 70,  H - T * 3,       1)    # 262,  y=498
-        self._add_platform(T * 4 + 80,  H - T * 4,       1)    # 336,  y=434
-        self._add_platform(T * 5 + 90,  H - T * 5,       1)    # 410,  y=370  peak of act 1
+        # First spring sends the player into the middle route.
+        self._add_trampoline(520, 560)
+        self._add_platform(600, h - tile * 5, 1)
+        self._add_platform(700, h - tile * 4, 1)
+        self._add_coin(545, 510)
+        self._add_coin(625, h - tile * 5 - 28)
+        self._add_coin(725, h - tile * 4 - 28)
 
-        # ── Act 2: Drop into a zigzag — alternating low/high ──────────────
-        # Player must consciously aim downward then up; no coasting
-        self._add_platform(T * 6 + 100, H - T * 3,       1)    # 484,  y=498  drop
-        self._add_platform(T * 8 + 115, H - T * 3,       1)    # 627,  y=498  drop again
-
-        # ── Act 3: Wide gap, single tile targets — no margin for error ────
-        # Horizontal gaps ~115–125px — near the player's max reach
-        self._add_platform(T * 10 + 100, H - T * 3,       1)    # 754,  y=434
+        # Second spring launches to the finish bridge.
+        self._add_trampoline(800, 500)
+        self._add_platform(770, h - tile * 6, 2)
+        self._add_coin(815, 455)
+        self._add_coin(815, h - tile * 6 - 44)
+        self._add_coin(875, h - tile * 6 - 22)
 
     def draw(self):
         if self.bg_tint:
             self.screen.blit(self.bg_tint, (0, 0))
         super().draw()
 
-
-# ======================================================================
-# Level 4 — The Abyss: pure floating platforms, no ground at all
-# ======================================================================
 
 class FourthLevel(Level):
-    """
-    Level 4: The floor is lava (or rather, the void).
-    No ground chunks except a tiny start and end island.
-    Platforms are arranged in three waves: a long crossing, 
-    a descending slope, and a tight vertical finale.
-    """
-    
+    """Level 4: Sky ruins with two void jumps and a high suspended exit."""
+
     def __init__(self, screen: pygame.Surface):
         try:
             self.bg_tint = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-            self.bg_tint.fill((20, 20, 80, 40))   # deep blue/void tint
+            self.bg_tint.fill((20, 20, 80, 40))
         except Exception:
             self.bg_tint = None
         super().__init__(screen)
 
     def build_floor(self):
-        T = self.TILE   # 64
-        H = self.H      # 690
-        W = self.W      # 924
+        tile = self.TILE
+        h = self.H
 
-        # Tiny start island
-        self._add_ground_run(0, T * 2)                            # 0–128
+        # Early floating stones lead into the first spring gap.
+        self._add_ground_run(0, tile * 2)
+        self._add_platform(180, h - tile * 2, 1)
+        self._add_platform(290, h - tile * 3, 1)
+        self._add_trampoline(400, 580)
+        self._add_coin(85, h - tile - 42)
+        self._add_coin(205, h - tile * 2 - 28)
+        self._add_coin(315, h - tile * 3 - 28)
+        self._add_coin(425, 532)
 
-        # ── Wave 1: Long mid-height crossing ──────────────────────────────
-        # Consistent height, gaps ~100px — tests horizontal precision
-        self._add_platform(T * 2 + 40,  H - T * 4,       2)     # 168,  y=434  wide first step
-        self._add_platform(T * 4 + 60,  H - T * 4,       1)     # 316,  y=434
-        self._add_platform(T * 5 + 70,  H - T * 4,       1)     # 390,  y=434
-        self._add_platform(T * 6 + 80,  H - T * 4,       1)     # 464,  y=434
+        # Mid-air ruins.
+        self._add_platform(500, h - tile * 5, 1)
+        self._add_platform(610, h - tile * 6, 1)
+        self._add_platform(710, h - tile * 5, 1)
+        self._add_coin(525, h - tile * 5 - 34)
+        self._add_coin(635, h - tile * 6 - 34)
+        self._add_coin(735, h - tile * 5 - 34)
 
-        # ── Wave 2: Descending slope — each step ~64px lower ──────────────
-        # Player must control descent without falling past the next platform
-        self._add_platform(T * 7 + 90,  H - T * 5,       1)     # 538,  y=370  (one step up for rhythm break)
-        self._add_platform(T * 8 + 100, H - T * 3,       1)     # 612,  y=498  big drop
-        self._add_platform(T * 9 + 110, H - T * 2,       2)     # 686,  y=562  near-ground wide catch
+        # Final spring vaults the player up to the last island.
+        self._add_trampoline(820, 500)
+        self._add_platform(770, h - tile * 6, 2)
+        self._add_coin(845, 450)
+        self._add_coin(805, h - tile * 6 - 44)
+        self._add_coin(875, h - tile * 6 - 20)
 
-        # ── Wave 3: Tight vertical finale ─────────────────────────────────
-        # Player climbs rapidly from near-ground to near-ceiling
-        # Each jump is ~80–85px up — within max height but demanding
-        self._add_platform(T * 11 + 50, H - T * 4,       1)     # 754,  y=434  relaunch
-        self._add_platform(T * 12 + 60, H - T * 6,       1)     # 828,  y=306  climb
-        self._add_platform(T * 13 + 70, H - T * 8,       2)     # 902,  y=178  near-ceiling wide finish
-
-        # Tiny end island at screen right — player walks off the top platform
-        # and lands on the end ground below while advancing right
-        self._add_ground_run(T * 13 + 70, W)                     # 902–924 (ground under finale)
-
-        self.trampolines.append(Trampoline(x=90, y=H - self.TILE, width=self.TILE))
-        
     def draw(self):
         if self.bg_tint:
             self.screen.blit(self.bg_tint, (0, 0))
         super().draw()
 
 
-# ======================================================================
-# Level 5 — The Summit: vertical climb with punishing drops
-# ======================================================================
-
 class FifthLevel(Level):
-    """
-    Level 5: The final level. A brutal vertical climb to the very top,
-    then a harrowing rightward traverse near the ceiling with tiny platforms.
-    Falling from the top sends the player almost all the way back down.
-    Three distinct zones: base climb, mid-traverse, summit sprint.
-    """
+    """Level 5: A summit run with a chained bounce finish and crown perch."""
 
     def __init__(self, screen: pygame.Surface):
         try:
             self.bg_tint = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-            self.bg_tint.fill((80, 0, 80, 35))   # dark purple tint — feels final
+            self.bg_tint.fill((80, 0, 80, 35))
         except Exception:
             self.bg_tint = None
 
@@ -311,50 +284,43 @@ class FifthLevel(Level):
         except (pygame.error, FileNotFoundError):
             self.crown = None
 
+        self.crown_pos = (832, 72)
         super().__init__(screen)
 
     def build_floor(self):
-        T = self.TILE   # 64
-        H = self.H      # 690
-        W = self.W      # 924
+        tile = self.TILE
+        h = self.H
 
-        # Ground start — generous, let the player breathe before the climb
-        self._add_ground_run(0, T * 3)                            # 0–192
+        # Opening climb.
+        self._add_ground_run(0, tile * 3)
+        self._add_platform(230, h - tile * 2, 1)
+        self._add_platform(340, h - tile * 3, 1)
+        self._add_platform(450, h - tile * 4, 1)
+        self._add_coin(120, h - tile - 42)
+        self._add_coin(255, h - tile * 2 - 28)
+        self._add_coin(365, h - tile * 3 - 28)
+        self._add_coin(475, h - tile * 4 - 28)
 
-        # ── Zone 1: Base climb — staggered left/right ascent ──────────────
-        # Platforms alternate sides so player weaves upward
-        # Height gain ~80px per jump — near the cap
-        self._add_platform(T * 3 + 20,  H - T * 2,       2)     # 212,  y=562  low right
-        self._add_platform(T * 1 + 10,  H - T * 4,       2)     # 74,   y=434  back left (backtrack forces rhythm)
-        self._add_platform(T * 3 + 30,  H - T * 6,       2)     # 222,  y=306  right again
-        self._add_platform(T * 1 + 10,  H - T * 8,       2)     # 74,   y=178  left — near ceiling
+        # First spring breaks into the upper mountain route.
+        self._add_trampoline(560, 580)
+        self._add_platform(640, h - tile * 6, 1)
+        self._add_platform(720, h - tile * 7, 1)
+        self._add_platform(770, h - tile * 6, 1)
+        self._add_coin(585, 532)
+        self._add_coin(665, h - tile * 6 - 30)
+        self._add_coin(745, h - tile * 7 - 30)
+        self._add_coin(795, h - tile * 6 - 30)
 
-        # ── Zone 2: Mid traverse — rightward run at mid-height ────────────
-        # After the climb the player must cover horizontal distance quickly
-        # Platforms at ~H - T*6 = 306px, gaps ~100–120px — demanding spacing
-        self._add_platform(T * 4 + 40,  H - T * 6,       1)     # 296,  y=306
-        self._add_platform(T * 5 + 60,  H - T * 7,       1)     # 380,  y=242  step up
-        self._add_platform(T * 6 + 80,  H - T * 6,       1)     # 464,  y=306  step down
-        self._add_platform(T * 7 + 100, H - T * 8,       1)     # 548,  y=178  high point
-        self._add_platform(T * 8 + 110, H - T * 6,       2)     # 622,  y=306  wide recovery
-
-        # ── Zone 3: Summit sprint — tiny platforms near ceiling ───────────
-        # Single-tile targets, ~115px apart, near H - T*8 = 178px from top
-        # A miss here is a long fall back to zone 2 or lower
-        self._add_platform(T * 10 + 80, H - T * 8,       1)     # 720,  y=178
-        self._add_platform(T * 11 + 90, H - T * 9,       1)     # 794,  y=114  near ceiling
-        self._add_platform(T * 12 + 100,H - T * 8,       1)     # 868,  y=178
-
-        # End ground — final sprint to the finish line
-        self._add_ground_run(T * 13 + 60, W)                     # 892–924
+        # Final spring sends the player to the summit bridge.
+        self._add_trampoline(820, 420)
+        self._add_platform(770, h - tile * 7, 2)
+        self._add_coin(845, 375)
+        self._add_coin(815, h - tile * 7 - 44)
+        self._add_coin(885, h - tile * 7 - 18)
 
     def draw(self):
         if self.bg_tint:
             self.screen.blit(self.bg_tint, (0, 0))
         super().draw()
-        # Draw a small crown above the finish area as a visual reward cue
         if self.crown:
-            T = self.TILE
-            cx = T * 13 + 60
-            cy = self.H - T * 2
-            self.screen.blit(self.crown, (cx, cy))
+            self.screen.blit(self.crown, self.crown_pos)

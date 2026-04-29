@@ -20,8 +20,14 @@ class LevelManager:
     index-based access.
     """
 
-    def __init__(self, screen: pygame.Surface, start_level: int = 0):
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        start_level: int = 0,
+        collected_coins: dict[int, set[str]] | None = None,
+    ):
         self.screen = screen
+        self.collected_coins = collected_coins if collected_coins is not None else {}
 
         # Registry: index → Level constructor (not instance, to allow lazy init)
         self._registry: OrderedDict[int, type] = OrderedDict([
@@ -33,7 +39,8 @@ class LevelManager:
         ])
 
         self.current_index = max(0, min(start_level, len(self._registry) - 1))
-        self._current_level = self._registry[self.current_index](screen)
+        self._current_level = None
+        self._load_level(self.current_index)
 
     # ------------------------------------------------------------------
     # Public interface
@@ -43,9 +50,21 @@ class LevelManager:
         """Return the platform rects for the active level."""
         return self._current_level.get_floor()
 
+    def get_current_coins(self) -> list:
+        """Return the collectible coins for the active level."""
+        return self._current_level.get_coins()
+
     def get_current_trampolines(self) -> list:
         """Return the trampoline rects for the active level."""
         return self._current_level.get_trampolines()
+
+    def collect_current_coins(self, player_rect: pygame.Rect) -> list[str]:
+        """Collect coins overlapping the player and persist their ids."""
+        collected_ids = self._current_level.collect_coins(player_rect)
+        if collected_ids:
+            saved = self.collected_coins.setdefault(self.current_index, set())
+            saved.update(collected_ids)
+        return collected_ids
 
     def draw(self):
         """Draw the active level."""
@@ -59,8 +78,7 @@ class LevelManager:
         next_index = self.current_index + 1
         if next_index not in self._registry:
             return False
-        self.current_index = next_index
-        self._current_level = self._registry[next_index](self.screen)
+        self._load_level(next_index)
         return True
     
     def previous_level(self) -> bool:
@@ -71,8 +89,7 @@ class LevelManager:
         prev_index = self.current_index - 1
         if prev_index not in self._registry:
             return False
-        self.current_index = prev_index
-        self._current_level = self._registry[prev_index](self.screen)
+        self._load_level(prev_index)
         return True
     
     def get_current_level(self) -> int:
@@ -83,5 +100,9 @@ class LevelManager:
         """Return the total number of registered levels."""
         return len(self._registry)
 
-    def get_current_trampolines(self) -> list:
-        return self._current_level.get_trampolines()
+    def _load_level(self, level_index: int):
+        """Instantiate the requested level and reapply collected coin state."""
+        self.current_index = level_index
+        self._current_level = self._registry[level_index](self.screen)
+        collected_ids = self.collected_coins.get(level_index, set())
+        self._current_level.apply_collected_coin_ids(collected_ids)

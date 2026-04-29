@@ -1,3 +1,62 @@
 {
-  "level": 3
+  "level": 4,
+  "coins": 46,
+  "collected_coins": {
+    "0": [
+      "coin_0",
+      "coin_1",
+      "coin_2",
+      "coin_3",
+      "coin_5",
+      "coin_6",
+      "coin_7",
+      "coin_8"
+    ],
+    "1": [
+      "coin_0",
+      "coin_1",
+      "coin_2",
+      "coin_3",
+      "coin_4",
+      "coin_5",
+      "coin_6",
+      "coin_7"
+    ],
+    "2": [
+      "coin_0",
+      "coin_1",
+      "coin_2",
+      "coin_3",
+      "coin_4",
+      "coin_5",
+      "coin_6",
+      "coin_7",
+      "coin_8",
+      "coin_9"
+    ],
+    "3": [
+      "coin_0",
+      "coin_1",
+      "coin_2",
+      "coin_3",
+      "coin_4",
+      "coin_5",
+      "coin_6",
+      "coin_7",
+      "coin_8",
+      "coin_9"
+    ],
+    "4": [
+      "coin_0",
+      "coin_1",
+      "coin_10",
+      "coin_2",
+      "coin_3",
+      "coin_4",
+      "coin_5",
+      "coin_6",
+      "coin_8",
+      "coin_9"
+    ]
+  }
 }
