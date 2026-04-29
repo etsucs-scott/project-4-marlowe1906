@@ -28,6 +28,7 @@ class LevelManager:
     ):
         self.screen = screen
         self.collected_coins = collected_coins if collected_coins is not None else {}
+        self._total_coin_count = None
 
         # Registry: index → Level constructor (not instance, to allow lazy init)
         self._registry: OrderedDict[int, type] = OrderedDict([
@@ -99,6 +100,15 @@ class LevelManager:
     def total_levels(self) -> int:
         """Return the total number of registered levels."""
         return len(self._registry)
+
+    def total_coin_count(self) -> int:
+        """Return the total number of coins placed across all levels."""
+        if self._total_coin_count is None:
+            self._total_coin_count = 0
+            for level_class in self._registry.values():
+                level = level_class(self.screen)
+                self._total_coin_count += len(level.get_coins())
+        return self._total_coin_count
 
     def _load_level(self, level_index: int):
         """Instantiate the requested level and reapply collected coin state."""

@@ -54,6 +54,7 @@ def _draw_win_animation(
     screen: pygame.Surface,
     elapsed_ms: int,
     total_coins: int,
+    total_possible_coins: int,
     title_font: pygame.font.Font,
     body_font: pygame.font.Font,
     hint_font: pygame.font.Font,
@@ -113,6 +114,13 @@ def _draw_win_animation(
     coins_x = SCREEN_WIDTH // 2 - coins_text.get_width() // 2
     screen.blit(coins_shadow, (coins_x + 2, 350))
     screen.blit(coins_text, (coins_x, 348))
+
+    if total_possible_coins > 0 and total_coins >= total_possible_coins:
+        special_text = body_font.render("Perfect run! Every coin collected!", True, (255, 250, 170))
+        special_shadow = body_font.render("Perfect run! Every coin collected!", True, (40, 60, 25))
+        special_x = SCREEN_WIDTH // 2 - special_text.get_width() // 2
+        screen.blit(special_shadow, (special_x + 2, 392))
+        screen.blit(special_text, (special_x, 390))
 
     hint = hint_font.render("R = Play Again   ESC = Menu", True, (230, 236, 230))
     hint_x = SCREEN_WIDTH // 2 - hint.get_width() // 2
@@ -284,6 +292,7 @@ def main():
                 screen,
                 elapsed_ms,
                 player.coins if player else 0,
+                level_manager.total_coin_count() if level_manager else 0,
                 win_title_font,
                 win_body_font,
                 win_hint_font,

@@ -258,6 +258,11 @@ class TestLevelManager(unittest.TestCase):
         level_manager = LevelManager(screen)
         self.assertEqual(level_manager.total_levels(), 5)
 
+    def test_total_coin_count(self):
+        screen = make_surface()
+        level_manager = LevelManager(screen)
+        self.assertGreater(level_manager.total_coin_count(), 0)
+
     def test_clamps_start_level(self):
         screen = make_surface()
         level_manager = LevelManager(screen, start_level=99)
